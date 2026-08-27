@@ -1,0 +1,13 @@
+description = "Читающий вызов Slack/Jira/dbhub из основного контекста — тяжёлые чтения делегируются субагенту"
+event    = "PreToolUse"
+type     = "pattern"
+severity = "warn"
+message  = """Тяжёлое чтение делегируй субагенту (jira-agent / slack-agent / db-explorer).
+Правило из CLAUDE.md: один известный вызов — делай сам, перебор ради одного факта — в агента."""
+
+[[match]]
+tool = ["mcp__slack__*_history", "mcp__slack__*_replies", "mcp__jira__jira_search*"]
+
+[check]
+source  = "in_subagent"
+deny_if = '^false$'

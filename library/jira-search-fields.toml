@@ -1,0 +1,13 @@
+description = "jira_search_issues без ограничения fields отдаёт мегабайты и рвёт лимит токенов"
+event    = "PreToolUse"
+type     = "pattern"
+severity = "warn"
+message  = """Передай fields в jira_search_issues — например key,summary,status,updated.
+Без ограничения полей ответ Jira рвёт контекст (см. commands/qb-weekly.md)."""
+
+[[match]]
+tool = ["mcp__jira__jira_search_issues", "mcp__jira__jira_search"]
+
+[check]
+source  = "tool_input"
+require = '"fields"\s*:\s*(?:"[^"]+"|\[[^\]]*[^\s\]][^\]]*\])'
