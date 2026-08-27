@@ -1,0 +1,18 @@
+description = "LLM-атрибуция в коммите рабочего репозитория QB — определяется по git remote, а не по расположению"
+event    = "PreToolUse"
+type     = "pattern"
+severity = "warn"
+message  = "Репозиторий смотрит на gitlab.loc (QB) — LLM-атрибуция в коммитах там запрещена."
+
+[[match]]
+tool       = "Bash"
+command    = '^\s*git\s+commit\b'
+git_remote = 'gitlab\.loc|qbrains'
+
+[[match]]
+tool       = ["mcp__gitlab-qb__*"]
+git_remote = 'gitlab\.loc|qbrains'
+
+[check]
+source  = "commit_message"
+deny_if = '(?i)Co-Authored-By:\s*Claude|Generated with \[?Claude'

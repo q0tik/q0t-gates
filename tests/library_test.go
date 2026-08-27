@@ -16,6 +16,8 @@ type ruleCase struct {
 	event map[string]any
 	// staged — содержимое git diff --staged, если правило смотрит туда
 	staged string
+	// remote — вывод git remote -v, если правило опознаёт репозиторий по факту
+	remote string
 	fires  bool
 }
 
@@ -83,6 +85,24 @@ func TestLibraryRules(t *testing.T) {
 				map[string]any{"key": "BSGD-1"}), fires: false},
 		},
 
+		// Ответ на возражение «модель не склеит два факта»: принадлежность
+		// репозитория определяется его remote, а не выводом модели и не тем,
+		// в каком каталоге он лежит.
+		"qb-no-llm-attribution": {
+			{name: "рабочий remote, грязный коммит",
+				event:  bashCommit("", `fix: x\n\nCo-Authored-By: Claude`),
+				remote: "origin\thttps://gitlab.loc/bsgd/pisya3.git (fetch)", fires: true},
+			{name: "рабочий remote, чистый коммит",
+				event:  bashCommit("", "fix: обычный"),
+				remote: "origin\thttps://gitlab.loc/bsgd/pisya3.git (fetch)", fires: false},
+			{name: "личный remote, тот же грязный коммит",
+				event:  bashCommit("", `fix: x\n\nCo-Authored-By: Claude`),
+				remote: "origin\tgit@github.com:q0tik/pet.git (fetch)", fires: false},
+			{name: "remote qbrains",
+				event:  bashCommit("", `fix: x\n\nCo-Authored-By: Claude`),
+				remote: "origin\thttps://docker-hub.qbrains.tech/x.git (fetch)", fires: true},
+		},
+
 		"no-secrets-staged": {
 			{name: "обычный код", event: bashCommit("", "feat: x"),
 				staged: "--- a/main.go\n+++ b/main.go\n+func main() {}\n", fires: false},
@@ -121,8 +141,8 @@ func TestLibraryRules(t *testing.T) {
 
 				ev := c.event
 				ev["cwd"] = e.project
-				if c.staged != "" {
-					fakeGitDiff(t, e.project, c.staged)
+				if c.staged != "" || c.remote != "" {
+					fakeGit(t, c.staged, c.remote)
 				}
 				raw, _ := json.Marshal(ev)
 				r := e.run(string(raw))
@@ -151,15 +171,27 @@ func TestLibraryRules(t *testing.T) {
 	}
 }
 
-// fakeGitDiff подкладывает git-обёртку, отдающую заданный diff: поднимать
-// настоящий репозиторий с индексом ради проверки регекспа — лишнее.
-func fakeGitDiff(t *testing.T, dir, diff string) {
+// fakeGit подкладывает git-обёртку, отвечающую по подкоманде: поднимать
+// настоящий репозиторий с индексом и remote ради проверки регекспа — лишнее.
+func fakeGit(t *testing.T, diff, remote string) {
 	t.Helper()
 	binDir := filepath.Join(t.TempDir(), "fakebin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\ncat <<'DIFF_EOF'\n" + diff + "\nDIFF_EOF\n"
+	script := `#!/bin/sh
+case "$1" in
+  diff)   cat <<'EOF_DIFF'
+` + diff + `
+EOF_DIFF
+;;
+  remote) cat <<'EOF_REMOTE'
+` + remote + `
+EOF_REMOTE
+;;
+  *) ;;
+esac
+`
 	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -56,6 +56,16 @@ func (r *Resolver) compute(name string) string {
 	case name == "staged_diff":
 		return r.git("diff", "--staged")
 
+	case name == "git_remote":
+		// Принадлежность репозитория определяется фактом, а не расположением в
+		// дереве: рабочий репозиторий может лежать где угодно, и требовать от
+		// модели вывода «этот каталог — рабочий» значит вернуть ту самую
+		// ненадёжную композицию фактов, ради устранения которой движок и написан.
+		return strings.TrimSpace(r.git("remote", "-v"))
+
+	case name == "git_branch":
+		return strings.TrimSpace(r.git("rev-parse", "--abbrev-ref", "HEAD"))
+
 	case name == "commit_message":
 		return r.commitMessage()
 
