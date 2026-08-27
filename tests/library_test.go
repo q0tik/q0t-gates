@@ -155,6 +155,14 @@ func TestLibraryRules(t *testing.T) {
 		}
 	}
 
+	// Набор случаев может жить в отдельном файле, если правило сложное и требует
+	// собственных фикстур. Список явный: молчаливое исключение вернуло бы ровно
+	// ту дыру, которую эта проверка закрывает.
+	coveredElsewhere := map[string]string{
+		"postmortem-required": "postmortem_test.go",
+		"postmortem-quality":  "postmortem_test.go",
+	}
+
 	// Обратная проверка: на складе не должно быть правил без набора случаев.
 	entries, err := os.ReadDir(libRoot)
 	if err != nil {
@@ -165,9 +173,13 @@ func TestLibraryRules(t *testing.T) {
 			continue
 		}
 		id := strings.TrimSuffix(f.Name(), ".toml")
-		if _, ok := suites[id]; !ok {
-			t.Errorf("правило %s лежит на складе без golden-случаев — добавь их в library_test.go", id)
+		if _, ok := suites[id]; ok {
+			continue
 		}
+		if _, ok := coveredElsewhere[id]; ok {
+			continue
+		}
+		t.Errorf("правило %s лежит на складе без golden-случаев — добавь их в library_test.go", id)
 	}
 }
 

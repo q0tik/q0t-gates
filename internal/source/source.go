@@ -72,6 +72,13 @@ func (r *Resolver) compute(name string) string {
 	case name == "transcript":
 		return r.transcript().mainText
 
+	case name == "transcript.user":
+		// Только реплики человека. Сигнал о том, ЧТО происходит, нельзя брать из
+		// полного транскрипта: туда попадают тексты загруженных скиллов, прочитанные
+		// заметки и выдача поиска. Слово вроде «инцидент» встречается там почти
+		// всегда — на реальных сессиях это давало 18 срабатываний из 25.
+		return r.transcript().userText
+
 	case name == "transcript.all":
 		return r.transcript().allText
 
@@ -150,6 +157,7 @@ func (r *Resolver) commitMessage() string {
 
 type transcript struct {
 	mainText        string
+	userText        string
 	allText         string
 	mainTools       []string
 	allTools        []string
@@ -174,14 +182,16 @@ func (r *Resolver) transcript() *transcript {
 	}
 	defer f.Close()
 
-	var mainB, allB strings.Builder
+	var mainB, allB, userB strings.Builder
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20) // строки транскрипта бывают очень длинными
 
 	for sc.Scan() {
 		var rec struct {
-			IsSidechain bool `json:"isSidechain"`
+			Type        string `json:"type"`
+			IsSidechain bool   `json:"isSidechain"`
 			Message     struct {
+				Role    string          `json:"role"`
 				Content json.RawMessage `json:"content"`
 			} `json:"message"`
 		}
@@ -201,11 +211,78 @@ func (r *Resolver) transcript() *transcript {
 			mainB.WriteString(text)
 			mainB.WriteByte('\n')
 			t.mainTools = append(t.mainTools, tools...)
+
+			// Результаты инструментов приходят тоже как user-записи, но человек их
+			// не писал — берём только текстовые блоки.
+			if rec.Type == "user" || rec.Message.Role == "user" {
+				userB.WriteString(plainText(rec.Message.Content))
+				userB.WriteByte('\n')
+			}
 		}
 	}
 	t.mainText = mainB.String()
+	t.userText = userB.String()
 	t.allText = allB.String()
 	return t
+}
+
+// Харнесс подмешивает в user-сообщения контент, которого человек не писал:
+// тексты загруженных скиллов, CLAUDE.md и напоминания внутри <system-reminder>,
+// раскрытые слэш-команды. Для «что сказал человек» это шум, причём решающий:
+// слово «инцидент» есть в самом скилле qb-vault, и без фильтра правило
+// срабатывало на 16 сессиях из 25.
+var reSystemReminder = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
+
+var injectedPrefixes = []string{
+	"Base directory for this skill:",
+	"<command-name>",
+	"<local-command",
+	"<command-message>",
+	"---\nname:",
+}
+
+func isInjected(t string) bool {
+	t = strings.TrimSpace(t)
+	for _, p := range injectedPrefixes {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// plainText берёт из сообщения только текст, написанный человеком: строку целиком
+// либо text-блоки, за вычетом подмешанного харнессом. tool_result и tool_use сюда
+// не попадают.
+func plainText(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return humanPart(s)
+	}
+	var blocks []map[string]any
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, blk := range blocks {
+		if blk["type"] != "text" {
+			continue
+		}
+		if t, ok := blk["text"].(string); ok {
+			if h := humanPart(t); h != "" {
+				b.WriteString(h)
+				b.WriteByte('\n')
+			}
+		}
+	}
+	return b.String()
+}
+
+func humanPart(t string) string {
+	if isInjected(t) {
+		return ""
+	}
+	return strings.TrimSpace(reSystemReminder.ReplaceAllString(t, ""))
 }
 
 // extractContent вытаскивает из блоков сообщения текст и имена вызванных

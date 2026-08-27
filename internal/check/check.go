@@ -79,6 +79,10 @@ func runScript(r *rule.Rule, ev *event.Event, res *source.Resolver, repoRoot str
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, path)
+	// Без WaitDelay отмена контекста убивает сам процесс, но не его потомков:
+	// они держат унаследованные пайпы, и Wait() ждёт их закрытия — то есть
+	// таймаут не работает вовсе. На Stop это подвешивает закрытие сессии.
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Stdin = bytes.NewReader(in)
 	cmd.Dir = ev.CWD
 	var out, errb bytes.Buffer
@@ -110,6 +114,7 @@ func runJudge(r *rule.Rule, res *source.Resolver) Result {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", r.Check.Model)
+	cmd.WaitDelay = 2 * time.Second // см. комментарий в runScript
 	cmd.Stdin = bytes.NewReader(b.Bytes())
 	// Судья не должен наследовать хук-контекст: иначе его собственные вызовы
 	// инструментов снова придут в движок и получится рекурсия.
@@ -149,7 +154,7 @@ func parseJudgeOutput(b []byte) (scriptVerdict, error) {
 // collectCommon отдаёт скрипту источники, которые дёшевы или уже вычислены.
 // staged_diff сюда не входит намеренно: скрипт запросит его сам, если нужен.
 func collectCommon(res *source.Resolver) map[string]string {
-	names := []string{"command", "prompt", "commit_message", "transcript", "transcript.tools", "in_subagent"}
+	names := []string{"command", "prompt", "commit_message", "transcript", "transcript.user", "transcript.tools", "in_subagent"}
 	out := make(map[string]string, len(names))
 	for _, n := range names {
 		out[n] = res.Get(n)
