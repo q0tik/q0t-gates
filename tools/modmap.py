@@ -205,6 +205,80 @@ def co_change(root: Path, commits: int) -> str:
     return "\n".join(f"  {n:2}×  {a}  ↔  {b}" for (a, b), n in top)
 
 
+def package_name(root: Path) -> str:
+    """Имя пакета — по нему ищутся потребители."""
+    py = root / "pyproject.toml"
+    if py.exists():
+        m = re.search(r'^name\s*=\s*"([^"]+)"', py.read_text(errors="replace"), re.M)
+        if m:
+            return m.group(1)
+    gomod = root / "go.mod"
+    if gomod.exists():
+        m = re.search(r"^module\s+(\S+)", gomod.read_text(errors="replace"), re.M)
+        if m:
+            return m.group(1)
+    pkg = root / "package.json"
+    if pkg.exists():
+        try:
+            return json.loads(pkg.read_text()).get("name", "")
+        except json.JSONDecodeError:
+            pass
+    return ""
+
+
+def consumers(root: Path) -> str:
+    """Кто снаружи зависит от этого репозитория и на какой версии.
+
+    Карта одного репозитория структурно недостаточна для библиотеки: раздел
+    «Импорты между модулями» показывает только внутрипакетные рёбра, а самое
+    дорогое у библиотеки — внешние потребители и разъехавшиеся пины. Этот
+    раздел добавлен после первого же боевого ревью, где ревьюер сам сообщил,
+    что находки пришлось добывать грепом по соседним репозиториям.
+    """
+    name = package_name(root)
+    if not name:
+        return "  (имя пакета не определено — потребителей не искали)"
+
+    workspace = root.parent
+    variants = {name, name.replace("-", "_"), name.replace("_", "-")}
+    rows: list[str] = []
+
+    # Репозитории лежат не только соседями: в QB часть сервисов вложена
+    # (janus_old/janus_transfers_eda). Ищем на два уровня вглубь.
+    candidates: list[Path] = []
+    for lvl1 in sorted(workspace.iterdir()):
+        if not lvl1.is_dir() or lvl1.name in SKIP_DIRS:
+            continue
+        candidates.append(lvl1)
+        if not (lvl1 / ".git").exists():
+            candidates.extend(d for d in sorted(lvl1.iterdir()) if d.is_dir())
+
+    for sibling in candidates:
+        if sibling == root or not (sibling / ".git").exists():
+            continue
+        for manifest in ("pyproject.toml", "requirements.txt", "go.mod", "package.json"):
+            mf = sibling / manifest
+            if not mf.exists():
+                continue
+            try:
+                body = mf.read_text(errors="replace")
+            except OSError:
+                continue
+            for v in variants:
+                for line in body.splitlines():
+                    if v in line and not line.strip().startswith("#"):
+                        label = str(sibling.relative_to(workspace))
+                        rows.append(f"  {label:<38} {manifest:<16} {line.strip()[:90]}")
+                        break
+
+    if not rows:
+        return (f"  (пакет `{name}`: потребителей среди соседних репозиториев не найдено —\n"
+                f"   искали только в {workspace}, монорепо и внешние потребители сюда не попадают)")
+    uniq = sorted(set(rows))
+    return (f"  пакет `{name}`, потребители в {workspace.name}/:\n" + "\n".join(uniq)
+            + "\n  ⚠ разные версии в пинах = потребители на разных линиях библиотеки")
+
+
 # ───────────────────────────── слой 1 ─────────────────────────────
 
 def symbols_and_imports(root: Path, files: list[Path], changed: set[str]):
@@ -402,6 +476,7 @@ def main() -> int:
     print(f"## Эндпоинты                    [{ep_layer}]\n{eps}\n")
     print(f"## Публичные символы            [{sym_layer}]\n{sym}\n")
     print(f"## Импорты между модулями       [{sym_layer}]\n{imp}\n")
+    print(f"## Потребители пакета         [слой 0]\n{consumers(root)}\n")
     print(f"## Связность по истории         [слой 0, {args.commits} коммитов]\n{co_change(root, args.commits)}\n")
     print(f"## Зависимости                  [слой 0]\n{dependencies(root)}")
     return 0
