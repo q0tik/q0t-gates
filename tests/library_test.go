@@ -161,6 +161,10 @@ func TestLibraryRules(t *testing.T) {
 	coveredElsewhere := map[string]string{
 		"postmortem-required": "postmortem_test.go",
 		"postmortem-quality":  "postmortem_test.go",
+		// Правило завязано на реальное дерево ~/Developer/QB и реальный реестр:
+		// в изолированном окружении e2e его не воспроизвести честно, поэтому
+		// проверяется прогоном самого скрипта (см. ниже, TestRegistryCheckScript).
+		"registry-covers-repos": "registry_test.go",
 	}
 
 	// Обратная проверка: на складе не должно быть правил без набора случаев.

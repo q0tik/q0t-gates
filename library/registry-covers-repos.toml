@@ -1,0 +1,17 @@
+description = "Работали с репозиторием, которого нет в реестре сущностей"
+event    = "Stop"
+type     = "script"
+severity = "warn"
+message  = """В сессии трогали репозиторий, которого нет в `.claude/registry.md`.
+Реестр ценен ровно полнотой: про репозиторий, которого в нём нет, агент не вспомнит —
+это возвращает ту самую несклеенную композицию фактов, ради которой реестр и заведён.
+
+Обнови: `python3 ~/Developer/q0t-gates/tools/registry.py ~/Developer/QB -o ~/Developer/QB/.claude/registry.md`
+и допиши колонки «назначение / что ломает» и «среда»."""
+
+[check]
+script = "checks/registry_covers_repos.py"
+
+[escape]
+source = "prompt"
+marker = "[skip-registry]"
