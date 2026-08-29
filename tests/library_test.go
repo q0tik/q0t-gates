@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -19,6 +20,15 @@ type ruleCase struct {
 	// remote — вывод git remote -v, если правило опознаёт репозиторий по факту
 	remote string
 	fires  bool
+}
+
+// toBlock ужесточает правило до block, чтобы срабатывание было видно в решении.
+// Через регексп, а не заменой точной строки: выравнивание полей в TOML — вопрос
+// вкуса автора правила, и тест не должен от него зависеть.
+var reSeverityWarn = regexp.MustCompile(`(?m)^severity(\s*)=(\s*)"warn"`)
+
+func toBlock(body string) string {
+	return reSeverityWarn.ReplaceAllString(body, `severity$1=$2"block"`)
 }
 
 func bashCommit(cwd, msg string) map[string]any {
@@ -136,8 +146,7 @@ func TestLibraryRules(t *testing.T) {
 				}
 				// Правила склада заезжают в warn; для проверки факта срабатывания
 				// ужесточаем до block, чтобы решение было видно в ответе.
-				e.putRule("project", id+".toml",
-					strings.Replace(string(body), `severity = "warn"`, `severity = "block"`, 1))
+				e.putRule("project", id+".toml", toBlock(string(body)))
 
 				ev := c.event
 				ev["cwd"] = e.project

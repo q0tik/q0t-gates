@@ -1,3 +1,4 @@
+source      = "Cowork/CLAUDE.md — tg_dialogs отдаёт ~2800 токенов за вызов"
 description = "Прямой вызов mcp__telegram__* из основного контекста вместо субагента telegram-agent"
 event    = "PreToolUse"
 type     = "pattern"

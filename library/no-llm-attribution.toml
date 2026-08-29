@@ -1,8 +1,9 @@
+source      = "QB/.claude/rules/python-services.md — запрет команды"
 description = "LLM-атрибуция в сообщении коммита — в QB запрещена (rules/python-services.md)"
 event    = "PreToolUse"
 type     = "pattern"
 severity = "warn"
-message  = "Убери LLM-атрибуцию из сообщения коммита: Co-Authored-By: Claude / Generated with Claude."
+message  = "Убери LLM-атрибуцию из сообщения коммита: Co-Authored-By: Claude / Generated with Claude.\n\nFIX: перепиши сообщение коммита без этих строк — `git commit --amend -m '…'`."
 
 [[match]]
 tool    = "Bash"

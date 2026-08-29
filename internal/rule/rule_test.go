@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, name, body string) string {
@@ -135,5 +136,40 @@ prompt = "проверь"
 	}
 	if r.Check.Model != "haiku" || r.Check.Timeout != 30 {
 		t.Errorf("ждали дефолты haiku/30, получили %q/%d", r.Check.Model, r.Check.Timeout)
+	}
+}
+
+// Правило без даты пересмотра живёт вечно, в том числе после исчезновения причины.
+// Дата — не украшение: это единственный механизм, заставляющий свод правил
+// сокращаться, а не только расти.
+func TestReviewAfter(t *testing.T) {
+	// Поля корня — В НАЧАЛО: дописанные в конец, они попадут внутрь [check].
+	body := "review_after = \"2026-01-15\"\nsource = \"инцидент BSGD-1\"\n" + validPattern
+	r, err := Load(write(t, "x.toml", body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Source == "" {
+		t.Error("source должен сохраняться")
+	}
+	past, _ := time.Parse("2006-01-02", "2026-06-01")
+	if !r.Expired(past) {
+		t.Error("правило с прошедшей датой должно считаться просроченным")
+	}
+	before, _ := time.Parse("2006-01-02", "2026-01-01")
+	if r.Expired(before) {
+		t.Error("до даты правило просроченным быть не должно")
+	}
+
+	noDate, err := Load(write(t, "y.toml", validPattern))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noDate.Expired(past) {
+		t.Error("без review_after правило не просрочено — но это и есть проблема, о ней сообщает gates library")
+	}
+
+	if _, err := Load(write(t, "z.toml", "review_after = \"15.01.2026\"\n"+validPattern)); err == nil {
+		t.Error("кривая дата должна отвергаться на загрузке")
 	}
 }

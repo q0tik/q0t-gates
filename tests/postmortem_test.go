@@ -158,8 +158,7 @@ func TestPostmortemRequired(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
 			// Ужесточаем до block, чтобы факт срабатывания был виден в решении.
-			e.putRule("project", "postmortem-required.toml",
-				strings.Replace(string(ruleBody), `severity = "warn"`, `severity = "block"`, 1))
+			e.putRule("project", "postmortem-required.toml", toBlock(string(ruleBody)))
 
 			checksDir := filepath.Join(e.root, "checks")
 			if err := os.MkdirAll(checksDir, 0o755); err != nil {

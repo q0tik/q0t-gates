@@ -110,6 +110,7 @@ func badge(s rule.Severity) string {
 }
 
 func cmdLibrary(root string) error {
+	var expired []*rule.Rule
 	libDir := filepath.Join(root, "library")
 	entries, err := os.ReadDir(libDir)
 	if err != nil {
@@ -130,9 +131,30 @@ func cmdLibrary(root string) error {
 			fmt.Printf("  ✗ %-28s БИТОЕ: %v\n", id, err)
 			continue
 		}
-		fmt.Printf("%s %-8s %-28s %s\n", mark, badge(r.Severity), id, shorten(r.Description, 60))
+		age := ""
+		if r.Expired(time.Now()) {
+			age = "  ⏰ПОРА ПЕРЕСМОТРЕТЬ (" + r.ReviewAfter + ")"
+		} else if r.ReviewAfter == "" {
+			age = "  ∞"
+		}
+		fmt.Printf("%s %-8s %-28s %s%s\n", mark, badge(r.Severity), id, shorten(r.Description, 52), age)
+		expired = append(expired, r)
 	}
 	fmt.Println("\nG — активировано глобально. Для проектов: gates list <dir>")
+
+	// Правило, у которого нет даты пересмотра, живёт вечно — в том числе после
+	// того, как причина его появления исчезла. Это главный способ, которым свод
+	// правил превращается в свалку.
+	var forever int
+	for _, r := range expired {
+		if r.ReviewAfter == "" {
+			forever++
+		}
+	}
+	if forever > 0 {
+		fmt.Printf("∞ — без даты пересмотра: %d. Правило без review_after никто не удалит,\n"+
+			"    даже когда причина ушла. Проставь дату там, где правило временное.\n", forever)
+	}
 	return nil
 }
 

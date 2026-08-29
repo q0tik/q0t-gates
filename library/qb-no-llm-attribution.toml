@@ -1,8 +1,9 @@
+source      = "то же правило, но по git remote: рабочий репозиторий может лежать вне ~/Developer/QB"
 description = "LLM-атрибуция в коммите рабочего репозитория QB — определяется по git remote, а не по расположению"
 event    = "PreToolUse"
 type     = "pattern"
 severity = "warn"
-message  = "Репозиторий смотрит на gitlab.loc (QB) — LLM-атрибуция в коммитах там запрещена."
+message  = "Репозиторий смотрит на gitlab.loc (QB) — LLM-атрибуция в коммитах там запрещена.\n\nFIX: `git commit --amend -m '…'` без строк атрибуции."
 
 [[match]]
 tool       = "Bash"

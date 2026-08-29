@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -93,6 +94,9 @@ type Rule struct {
 	Disabled    bool
 	Reason      string // обязателен при Disabled
 	FailClosed  bool
+	Source      string // откуда правило взялось: инцидент, тикет, разбор
+	ReviewAfter string // YYYY-MM-DD: когда пересмотреть. Правило без даты пересмотра
+	//                    бессмертно — его никто не удалит, даже когда причина ушла
 }
 
 // AllowedEscapeSources — источники, в которых допустимо искать escape-маркер.
@@ -116,6 +120,8 @@ type rawRule struct {
 	Disabled    bool             `toml:"disabled"`
 	Reason      string           `toml:"reason"`
 	FailClosed  bool             `toml:"fail_closed"`
+	Source      string           `toml:"source"`
+	ReviewAfter string           `toml:"review_after"`
 	Match       []map[string]any `toml:"match"`
 	Check       map[string]any   `toml:"check"`
 	Escape      map[string]any   `toml:"escape"`
@@ -151,6 +157,8 @@ func Load(path string) (*Rule, error) {
 		Disabled:    raw.Disabled,
 		Reason:      raw.Reason,
 		FailClosed:  raw.FailClosed,
+		Source:      raw.Source,
+		ReviewAfter: raw.ReviewAfter,
 	}
 
 	// Выключающая заглушка: перекрывает унаследованное правило и больше ничего
@@ -199,7 +207,23 @@ func parseHeader(r *Rule, path string) error {
 	default:
 		return fmt.Errorf("%s: неизвестный severity %q", path, r.Severity)
 	}
+	if r.ReviewAfter != "" {
+		if _, err := time.Parse("2006-01-02", r.ReviewAfter); err != nil {
+			return fmt.Errorf("%s: review_after должен быть YYYY-MM-DD, получено %q", path, r.ReviewAfter)
+		}
+	}
 	return nil
+}
+
+// Expired — пора ли пересмотреть правило. Пустая дата означает «пересматривать
+// никогда», и это осознанный выбор автора, а не забывчивость: движок о таких
+// правилах сообщает отдельно в `gates library`.
+func (r *Rule) Expired(now time.Time) bool {
+	if r.ReviewAfter == "" {
+		return false
+	}
+	d, err := time.Parse("2006-01-02", r.ReviewAfter)
+	return err == nil && now.After(d)
 }
 
 func parseMatch(r *Rule, raw []map[string]any, path string) error {
