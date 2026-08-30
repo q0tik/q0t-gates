@@ -1,0 +1,49 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: go vet
+        run: go vet ./...
+
+      # Правила — данные, и они ломаются от опечатки так же, как код.
+      # Битое правило не срабатывает молча, поэтому проверка обязательна.
+      - name: правила загружаются
+        run: |
+          go build -o bin/gates ./cmd/gates
+          Q0T_GATES_ROOT="$PWD" ./bin/gates check
+
+      - name: тесты
+        run: go test ./... -count=1
+
+      # Проверка на правило без golden-случаев живёт внутри тестов, но её легко
+      # не заметить в общем выводе — вытаскиваем отдельным шагом.
+      - name: у каждого правила есть golden-случаи
+        run: go test ./tests/ -run TestLibraryRules -count=1 -v 2>&1 | grep -q "^--- PASS: TestLibraryRules"
+
+  python-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # checks/*.py вызываются движком как внешние процессы: синтаксическая
+      # ошибка в них проявится только в момент срабатывания правила, то есть
+      # в самый неподходящий момент.
+      - name: скрипты проверок компилируются
+        run: python3 -m compileall -q checks/ tools/
