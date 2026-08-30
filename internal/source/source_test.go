@@ -100,21 +100,11 @@ func TestTranscriptSeparatesSidechain(t *testing.T) {
 	}
 }
 
-func TestInSubagent(t *testing.T) {
-	if got := transcriptResolver(t, transcriptJSONL).Get("in_subagent"); got != "true" {
-		t.Errorf("последняя запись — субагентская, ждали true, получили %q", got)
-	}
-	main := `{"isSidechain":false,"message":{"content":[{"type":"text","text":"я в основном"}]}}` + "\n"
-	if got := transcriptResolver(t, main).Get("in_subagent"); got != "false" {
-		t.Errorf("последняя запись основная, ждали false, получили %q", got)
-	}
-}
-
 // Отсутствующий транскрипт — обычная ситуация (PreToolUse в начале сессии).
 // Движок обязан отдать пустое значение, а не упасть.
 func TestMissingTranscript(t *testing.T) {
 	r := resolverFor(t, `{"transcript_path":"/nope/nope.jsonl"}`)
-	if r.Get("transcript") != "" || r.Get("in_subagent") != "false" {
+	if r.Get("transcript") != "" || r.Get("transcript.tools") != "" {
 		t.Error("отсутствующий транскрипт должен давать пустые значения без паники")
 	}
 }
@@ -153,4 +143,14 @@ func quote(s string) string {
 	}
 	b.WriteByte('"')
 	return b.String()
+}
+
+// Источник in_subagent удалён осознанно: эксперимент 2026-08-30 показал, что вызов
+// из субагента неотличим от вызова из основного контекста по данным события.
+// Тест держит это решение: если кто-то вернёт источник, не разобравшись, он упадёт.
+func TestNoInSubagentSource(t *testing.T) {
+	r := resolverFor(t, `{"transcript_path":"/nope"}`)
+	if got := r.Get("in_subagent"); got != "" {
+		t.Errorf("in_subagent должен быть удалён, получено %q — см. README, раздел «Чего нельзя проверить гейтом»", got)
+	}
 }

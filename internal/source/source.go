@@ -88,11 +88,11 @@ func (r *Resolver) compute(name string) string {
 	case name == "transcript.tools.all":
 		return strings.Join(r.transcript().allTools, "\n")
 
-	case name == "in_subagent":
-		if r.transcript().lastIsSidechain {
-			return "true"
-		}
-		return "false"
+	// Источника in_subagent больше нет. Проверено экспериментом 2026-08-30:
+	// вызов инструмента из субагента приходит хуку с ТЕМ ЖЕ session_id и тем же
+	// transcript_path, что и вызов из основного контекста, а поля isSidechain в
+	// событии нет вовсе. Отличить одно от другого по данным события нельзя,
+	// поэтому правила вида «только через субагента» гейтом не выражаются.
 
 	case strings.HasPrefix(name, "file:"):
 		p := strings.TrimPrefix(name, "file:")

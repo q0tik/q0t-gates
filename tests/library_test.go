@@ -78,23 +78,6 @@ func TestLibraryRules(t *testing.T) {
 				map[string]any{"key": "BSGD-1"}), fires: false},
 		},
 
-		"telegram-via-agent": {
-			{name: "из основного контекста", event: mcpTool("", "mcp__telegram__tg_dialogs", map[string]any{}), fires: true},
-			{name: "отправка из основного", event: mcpTool("", "mcp__telegram__tg_send",
-				map[string]any{"peer": "x", "text": "y"}), fires: true},
-			{name: "не telegram", event: mcpTool("", "mcp__obsidian__read_note",
-				map[string]any{"path": "x.md"}), fires: false},
-		},
-
-		"heavy-reads-via-subagent": {
-			{name: "история Slack из основного", event: mcpTool("", "mcp__slack__conversations_history",
-				map[string]any{"channel": "C1"}), fires: true},
-			{name: "поиск Jira из основного", event: mcpTool("", "mcp__jira__jira_search_issues",
-				map[string]any{"jql": "x", "fields": "key"}), fires: true},
-			{name: "точечное чтение тикета", event: mcpTool("", "mcp__jira__jira_get_issue",
-				map[string]any{"key": "BSGD-1"}), fires: false},
-		},
-
 		// Ответ на возражение «модель не склеит два факта»: принадлежность
 		// репозитория определяется его remote, а не выводом модели и не тем,
 		// в каком каталоге он лежит.
