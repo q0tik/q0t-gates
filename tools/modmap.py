@@ -352,9 +352,69 @@ def symbols_and_imports(root: Path, files: list[Path], changed: set[str]):
 
     if edges:
         imp_txt = "\n".join(f"  {n:2}×  {a}  →  {b}" for (a, b), n in edges.most_common(20))
+        imp_txt += "\n" + structure_signals(edges)
     else:
         imp_txt = "  (внутренних импортов между модулями не обнаружено)"
     return sym_txt, imp_txt
+
+
+def structure_signals(edges: collections.Counter) -> str:
+    """Циклы и перекос связности — то, ради чего граф вообще нужен.
+
+    Сам по себе список рёбер архитектору мало что говорит: он его не удержит и
+    выводов из него не сделает. Выводы делают две вещи — цикл (модули нельзя
+    менять и тестировать по отдельности) и перекос fan-in/fan-out (модуль, от
+    которого зависит всё, дорожает при каждой правке).
+    """
+    # Рёбра между директориями: logic.models.stevia → logic/models
+    graph: dict[str, set[str]] = collections.defaultdict(set)
+    for (src, dotted), _ in edges.items():
+        dst = str(Path(dotted.replace(".", "/")).parent)
+        if dst in (".", "") or dst == src:
+            continue
+        graph[src].add(dst)
+
+    out = []
+
+    if cycles := find_cycles(graph):
+        out.append("\n  ⚠ ЦИКЛЫ (модули нельзя изменить и протестировать по отдельности):")
+        for c in cycles[:5]:
+            out.append("      " + " → ".join(c + [c[0]]))
+
+    fan_in: collections.Counter = collections.Counter()
+    for src, dsts in graph.items():
+        for d in dsts:
+            fan_in[d] += 1
+    if fan_in:
+        top = fan_in.most_common(3)
+        if top[0][1] >= 2:
+            out.append("\n  Кто держит систему (fan-in — сколько модулей зависит):")
+            for mod, n in top:
+                out.append(f"      {mod:<38} ← {n}")
+            out.append("      правка модуля с высоким fan-in задевает всех, кто на него смотрит")
+    return "\n".join(out)
+
+
+def find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
+    """Обычный обход в глубину со стеком: графы модулей маленькие."""
+    found: list[list[str]] = []
+    state: dict[str, int] = {}  # 0 — не был, 1 — в стеке, 2 — закрыт
+
+    def walk(node: str, stack: list[str]) -> None:
+        state[node] = 1
+        stack.append(node)
+        for nxt in sorted(graph.get(node, ())):
+            if state.get(nxt, 0) == 1:
+                found.append(stack[stack.index(nxt):])
+            elif state.get(nxt, 0) == 0:
+                walk(nxt, stack)
+        stack.pop()
+        state[node] = 2
+
+    for n in sorted(graph):
+        if state.get(n, 0) == 0:
+            walk(n, [])
+    return found
 
 
 def node_name(node, src: bytes) -> str:
