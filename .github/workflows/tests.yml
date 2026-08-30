@@ -32,7 +32,10 @@ jobs:
       # Проверка на правило без golden-случаев живёт внутри тестов, но её легко
       # не заметить в общем выводе — вытаскиваем отдельным шагом.
       - name: у каждого правила есть golden-случаи
-        run: go test ./tests/ -run TestLibraryRules -count=1 -v 2>&1 | grep -q "^--- PASS: TestLibraryRules"
+        run: |
+          go test ./tests/ -run TestLibraryRules -count=1 -v 2>&1 \
+            | tee /tmp/golden.log
+          grep -q '^--- PASS: TestLibraryRules' /tmp/golden.log
 
   python-checks:
     runs-on: ubuntu-latest
