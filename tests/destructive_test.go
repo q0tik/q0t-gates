@@ -52,6 +52,11 @@ func TestDestructiveAsksForConfirmation(t *testing.T) {
 		`psql -h localhost -c "DROP TABLE users"`,
 		"redis-cli FLUSHALL",
 		"alembic downgrade -1",
+		// Запись через хранимку: слово INSERT внутри литерала, ключевыми словами
+		// не ловится — на этом в бою прошла бы правка прод-настроек.
+		`psql -c "SELECT modify_janus_settings('INSERT', 'eda_relay_enabled_stage', '0'::jsonb)"`,
+		`psql -c "SELECT call_pg_proc('x', 1)"`,
+		`psql -c "SELECT set_recons_settings('x')"`,
 		"docker system prune -af",
 	}
 	for _, cmd := range dangerous {
@@ -78,6 +83,8 @@ func TestOrdinaryWorkPassesSilently(t *testing.T) {
 		"npm install",
 		"go test ./...",
 		`psql -c "SELECT count(*) FROM users"`,
+		`psql -c "SELECT get_janus_executions(1, 2)"`,
+		`psql -c "SELECT set_config('search_path','public',false)"`,
 		"grep -r 'docker compose down' docs/",
 		"cat ~/Services/docker-compose.yml",
 	}

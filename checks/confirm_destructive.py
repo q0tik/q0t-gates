@@ -62,7 +62,12 @@ DANGER = [
     (r"AdGuardHome\.yaml", "правка конфигурации AdGuard (DNS всего дома)"),
 
     # базы
-    (r"\bpsql\b[^|]*\b(-c|--command)\b[^|]*\b(DROP|TRUNCATE|DELETE|ALTER)\b", "разрушающий SQL"),
+    (r"\bpsql\b[^|]*\b(-c|--command)\b[^|]*\b(DROP|TRUNCATE|DELETE|ALTER|INSERT|UPDATE)\b", "разрушающий SQL"),
+    # Запись через хранимку ключевыми словами не ловится: в
+    # `SELECT modify_janus_settings('INSERT', ...)` слово INSERT лежит внутри
+    # литерала. Ловим по имени функции — оно вне кавычек.
+    (r"\b(modify|insert|update|delete|upsert|merge|claim|cleanup|remove|write|save|apply|recalc|set|add)_[a-z0-9_]*\s*\(", "запись через хранимку"),
+    (r"\bcall_pg_proc\s*\(", "запись через хранимку (call_pg_proc)"),
     (r"\b(DROP|TRUNCATE)\s+(TABLE|DATABASE|SCHEMA)\b", "разрушающий SQL"),
     (r"\bredis-cli\b[^|]*\b(FLUSHALL|FLUSHDB)\b", "очистка Redis"),
     (r"\bkafka-topics(\.sh)?\b[^|]*--delete\b", "удаление Kafka-топика"),
@@ -71,6 +76,9 @@ DANGER = [
 
 # Чтение и разведка деструктивными не считаются, даже если слова совпали.
 SAFE_PREFIX = re.compile(r"^\s*(git\s+(status|diff|log|show)|ls|cat|grep|rg|find|docker\s+(ps|logs|images|inspect))\b")
+
+# Служебные функции Postgres с теми же префиксами — не запись в наши таблицы.
+PROC_SAFE = re.compile(r"\b(set_config|set_bit|set_byte|set_masklen|add_month)\s*\(", re.I)
 
 
 def verdict(violated: bool, reason: str) -> None:
@@ -104,7 +112,8 @@ def api(token: str, method: str, payload: dict | None = None, timeout: int = 20)
 def classify(cmd: str) -> str:
     if SAFE_PREFIX.match(cmd):
         return ""
-    hits = [name for rx, name in DANGER if re.search(rx, cmd, re.I)]
+    probe = PROC_SAFE.sub("", cmd)  # служебные функции не должны давать срабатывание
+    hits = [name for rx, name in DANGER if re.search(rx, probe, re.I)]
     if not hits:
         return ""
     # Удаление вне защищённых путей — обычная работа, спрашивать незачем.
