@@ -1,0 +1,21 @@
+source      = "перенос харнеса на homelab 2026-09-03; на сервере опаснее не SQL, а операции с контейнерами и данными"
+description = "Разрушительная операция на сервере — подтверждение в Telegram перед выполнением"
+event       = "PreToolUse"
+type        = "script"
+severity    = "block"
+fail_closed = true
+message     = """Операция требует подтверждения в Telegram — я отправил её тебе с кнопками.
+
+Подтверждения не было (отклонил, истекло время или Telegram недоступен), поэтому команда не выполнена.
+
+FIX: если операция нужна — подтверди в Telegram и повтори. Если Telegram недоступен, а операция срочная — добавь [skip-confirm] в свой запрос."""
+
+[[match]]
+tool = "Bash"
+
+[check]
+script = "checks/confirm_destructive.py"
+
+[escape]
+source = "prompt"
+marker = "[skip-confirm]"

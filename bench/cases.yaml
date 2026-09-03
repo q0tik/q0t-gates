@@ -1,0 +1,186 @@
+# Бенчмарк-набор агентской системы QB — версия 1 (2026-08-30)
+#
+# Пять реально закрытых задач BSGD. Каждая описана так, чтобы её можно было
+# выдать агенту сегодня и машинно проверить результат.
+#
+# ВАЖНО про воспроизводимость: все пять фиксов уже в репозиториях. Кейс запускать
+# только на состоянии ДО фикса — `base` в каждом кейсе — иначе агент найдёт готовый
+# ответ и набор ничего не измерит:
+#     git -C <repo> worktree add /tmp/bench-<id> <base>
+#
+# Поля:
+#   prompt  — дословный вход, как его написал бы человек. Без подсказок и без решения.
+#   accept  — что должно получиться. Проверяется человеком за минуту, глядя на дифф/ответ.
+#   reject  — что запрещено, даже если accept выполнен. Важнее accept.
+#   notes   — как было решено на самом деле. НЕ показывать агенту.
+
+version: 1
+created: 2026-08-30
+
+cases:
+
+  - id: BSGD-4491-sc-recovery-approve
+    type: правка кода (bugfix по сообщению из Slack)
+    repo: accountant_web
+    base: 4dc2d51f            # родитель фикс-коммита bd1b020e
+    prompt: |
+      P1 из Slack: пишут, что через веб не сработало удаление банов.
+      Кнопка «Allow Auto Deposits to SC» отвечает 400 «Trading recovery already
+      completed.», при этом баны висят и автодепозиты не идут. На странице статуса
+      при этом видно stopped и те самые баны. Разберись и почини.
+    accept:
+      - "в utils/sc_recovery.py process_approve больше не решает по «было ли когда-нибудь recovery_executed» — состояние выводится тем же способом, что и в GET /status"
+      - "проверка first_approve тоже перестала срабатывать по застарелой записи из прошлого инцидента"
+      - "в tests/test_sc_recovery.py есть тест: лог содержит завершённое ПРОШЛОЕ recovery + висящие баны → ответ НЕ already_completed"
+      - "pytest tests/test_sc_recovery.py — зелёный"
+    reject:
+      - "починка свелась к чистке/усечению sc_trading_recovery_log — таблица append-only, её не чистят"
+      - "GET /status и POST approve остались на двух разных способах определить состояние"
+      - "исправлен только recovery_executed, а first_approve оставлен как был (two-man rule по-прежнему обходится застарелым апрувом)"
+      - "открыт MR только в одну ветку: у accountant_web фикс идёт и в stage, и в master"
+      - "в коммите есть Co-Authored-By или «Generated with Claude»"
+    notes: |
+      Реальное решение (коммит bd1b020e, ветка fix/BSGD-4491-recovery-approve-state,
+      MR !466 в stage и !467 в master, 7 тестов в tests/test_sc_recovery.py):
+      process_approve сканировал append-only sc_trading_recovery_log на любой
+      recovery_executed / first_approve за всю историю, поэтому после ПЕРВОГО в истории
+      recovery защёлкивался навсегда. GET /status при этом жил на _derive_state с cutoff
+      и показывал правду. Фикс — перевести approve на тот же _derive_state
+      (log + get_emergency_bans + get_mod25_active). Побочно вылечилось полуразобранное
+      состояние (баны сняли руками, mod25 выключен вручную).
+      Первоисточник — тред в #bsg-bsgdev, репортёр завёл тикет из Slack.
+
+  - id: BSGD-3989-xmr-kraken-route
+    type: SQL / справочник в БД, без репозитория
+    repo: QB
+    base: n/a                 # правка в БД; в проде уже применена — проверяем предложение, не результат
+    prompt: |
+      Маршрут XMR → Kraken не отдаётся в Janus Transferable Routes, из-за этого больше
+      3M USD в XMR заперто на perpetual-счетах. В отчёте push-сервиса —
+      «Skip by available exchanges is empty». Похоже на хардкод privacy-коинов
+      где-то в маршрутах. Посмотри, что там, и скажи, чем чинить.
+    accept:
+      - "названа настоящая причина: у Kraken строка с chain='MONERO', у остальных бирж 'XMR', джойн идёт внутри одного chain — пары не строятся"
+      - "показано, откуда берётся chain: в bsg_chains нет строки канонизации для (exchange_id=10, chain_exch='MONERO'), поэтому подставляется сырое chain_exch"
+      - "предложенный фикс — одна строка INSERT в bsg_chains (10, 'MONERO', 'XMR')"
+      - "явно сказано, что гипотеза про хардкод privacy-коинов не подтвердилась, и указано, где искали (get_janus_transferable_routes, get_janus_asset_chain_matching)"
+      - "есть шаги проверки после применения: bsg_chains → refresh_static_exchange_assets_v2() → маршрут появился в выдаче"
+    reject:
+      - "предложен UPDATE static_exchange_assets_v2 — это derived-таблица, правка откатится ближайшим refresh_static_exchange_assets_v2()"
+      - "как основной фикс предложены static_exchange_asset_chains_v3 или static_maps_bsg_chains (в путь сборки v2 не входят)"
+      - "выполнен любой пишущий SQL по проду: задача — предложить и обосновать, применяет человек"
+      - "вывод сделан только чтением кода, без единого SELECT по БД"
+      - "причиной названа гипотеза репортёра без её проверки"
+    notes: |
+      Реальный разбор: цепочка get_janus_transferable_routes → get_janus_asset_chain_matching
+      читает static_exchange_assets_v2 и джойнит внутри одного chain при
+      exchange_to != exchange_from. У Kraken XMR лежит на chain='MONERO' одиноко,
+      у 16 других бирж — 'XMR'. static_exchange_assets_v2 пересобирается
+      refresh_static_exchange_assets_v2() из form_static_exchange_assets_v2(), где
+      chain = COALESCE(bc.chain, d.chain_exch) с LEFT JOIN на bsg_chains. Записи
+      (Kraken, 'MONERO') в bsg_chains нет → сырое 'MONERO'. Фикс — одна строка INSERT.
+      Контрпример к гипотезе репортёра: ZEC/BTC у Kraken тоже неканоничны (ZCASH,
+      BITCOIN), но маршруты работают — там на той же сети есть Okex.Europe.
+      Побочно: у Kraken ещё ~217 таких же осиротевших активов — отдельная задача.
+
+  - id: BSGD-4433-bans-bulk-duplicates
+    type: хранимка / БД-разведка, ложная посылка в тикете
+    repo: accountant_web
+    base: 1fccdcfa            # родитель первого коммита ветки feat/BSGD-4433-bans-upsert
+    prompt: |
+      Жалоба: повторная отправка той же формы или того же CSV в bulk-банах плодит дубли.
+      В тикете написано, что на stage нет unique-индекса bsg_transfers_bans_uniqueness,
+      который есть на проде, — поэтому и дубли. Заведи индекс на stage и проверь,
+      что дубли больше не появляются.
+    accept:
+      - "показано, что unique-индекс проблему не закрывает: ts_from приложением не задаётся, идёт дефолт now(), а индекс включает ts_from — повторная отправка спустя время даёт новый ключ и на проде"
+      - "в repository/bsg_transfers_bans.py bulk ищет существующий бан по бизнес-ключу и делает UPDATE вместо INSERT"
+      - "бизнес-ключ НЕ включает ts_to, info и ts_from"
+      - "сравнение NULL-safe (IS NOT DISTINCT FROM), а не '='"
+      - "пустой info при повторной отправке не затирает прежний"
+      - "есть тесты на четыре ветки: вставка, обновление, сохранение прежнего info, выбор самой свежей строки при нескольких совпадениях"
+    reject:
+      - "решением объявлено «накатить индекс на stage», и нет демонстрации, что это чинит повторную отправку"
+      - "выполнен пишущий SQL или DDL по проду либо stage"
+      - "бизнес-ключ склеен через '=' — строки с NULL (wildcard-измерение) перестают находиться"
+      - "из ответа POST /bans/bulk пропал ключ created (его читает фронт)"
+      - "переписана хранимка modify_bsg_transfers_bans, хотя UPDATE по row_id в ней уже есть"
+      - "в коммите есть Co-Authored-By или «Generated with Claude»"
+    notes: |
+      Реальное решение (ветка feat/BSGD-4433-bans-upsert, коммиты 5b7f726e / 12bb0a33
+      + тесты 476aad0c / 1db203ec, MR !458 в stage, 17 тестов):
+      главное — тикет неправ. Хранимка modify_bsg_transfers_bans (plpython3u) не падает,
+      а возвращает текст ошибки; UPDATE по row_id переписывает всё кроме ts_from; ts_from
+      = now() по дефолту колонки. Индекс bsg_transfers_bans_uniqueness включает ts_from,
+      поэтому ловит дубли только внутри одного батча (одна транзакция = один now()).
+      Решение — upsert по бизнес-ключу (asset, exchange_from, exchange_to, chain,
+      account_from_id, account_to_id, module_id) с IS NOT DISTINCT FROM и id DESC.
+      Ответ расширен до {created, updated}; проверка результата внутри транзакции,
+      не-success → 400 и откат батча (чинит partial-commit).
+
+  - id: BSGD-4185-slackbot-broken-image
+    type: разбор инцидента / CI-деплой
+    repo: backoffice_slackbot
+    base: 4eccdad             # родитель фикс-коммита 049f962
+    prompt: |
+      backoffice_slackbot: пайплайн упал, а сервис всё равно раскатался — на проде
+      оказался битый образ. Сделай так, чтобы упавший пайплайн не трогал прод.
+    accept:
+      - "в .gitlab-ci.yml тег образа стал уникальным на коммит (в теге есть CI_COMMIT_SHORT_SHA), а не голая poetry-версия"
+      - "APP_VERSION в build.env и DOCKER_BUILD_TAG изменены согласованно — deploy-джоб не уедет на несуществующий тег"
+      - "объяснено, почему это чинит: под неуникальным тегом push перезаписывает образ, и auto_revert в Nomad откатывается на тот же (уже битый) образ"
+      - "изменения ограничены .gitlab-ci.yml (и при необходимости nomad_job/job.nomad) этого репозитория"
+    reject:
+      - "заведён DESK-тикет на девопсов или сказано, что нужны правки общих шаблонов desk/gitlab_ci_templates — для этого тикета все рычаги в самом репозитории"
+      - "правка сделана только в одном из двух мест (APP_VERSION или DOCKER_BUILD_TAG) — теги разъезжаются"
+      - "предложен обход CI: ручной деплой levant/nomad вместо починки пайплайна"
+      - "сделан вывод про причину без чтения логов упавшего пайплайна и истории деплоев"
+      - "в коммите есть Co-Authored-By или «Generated with Claude»"
+    notes: |
+      Реальное решение (ветка fix/BSGD-4185-unique-image-tag, коммит 049f962, MR !23 в main):
+      было `APP_VERSION=$(poetry version --short)` и DOCKER_BUILD_TAG с той же голой
+      версией — стало `$(poetry version --short)-$CI_COMMIT_SHORT_SHA` в обоих местах,
+      APP_VERSION прокидывается в оба deploy-джоба через dotenv-артефакт. Подтверждено
+      постмерж-пайплайном: push тега 0.1.0-0da9c6ef и levant --var app_version с ним же.
+      Ловушка кейса: соблазн объявить это девопсовой задачей. Шаблоны GitLab CI тег не
+      задают, его задаёт свой .gitlab-ci.yml — DESK не нужен.
+
+  - id: BSGD-4629-bsgbot-blocks-trigger
+    type: интеграция Jira ↔ Slack, разбор молчащей связки
+    repo: backoffice_slackbot
+    base: bf20d9e             # родитель фикс-коммита 47b19f5
+    prompt: |
+      P1: BSGbot перестал заводить задачи из канала C0B4WHQKJJF. Алерты в канал идут,
+      а задач в Jira по ним нет — судя по каналу, уже давно. Разберись, почему, и почини.
+    accept:
+      - "названа причина: триггер BSGbot перестал попадать в event['text'] отправителя и остался только в blocks, а хендлер читал только text"
+      - "в src/backoffice_slack_bot/utils/parse.py появился разбор Block Kit; text остаётся приоритетным, в blocks заглядываем только если в text триггера нет"
+      - "разбор начинается ОТ места, где найден триггер (включая смещение внутри части), а не от начала сообщения или от первого блока"
+      - "тексты блоков собираются по whitelist полей, а не рекурсивным обходом всех ключей 'text'"
+      - "описание задачи = текст отправителя, а не склейка blocks+text"
+      - "C0B4WHQKJJF добавлен в CHANNEL_NAMES"
+      - "есть тест на реальном событии из канала (зафиксированная фикстура), и показано, что он краснеет на откаченном хендлере"
+    reject:
+      - "подписи кнопок попадают в описание задачи — фильтр только по типу блока actions, а через section.accessory или input та же кнопка проходит"
+      - "приоритет задачи зависит от того, в каком по счёту блоке лежит триггер (перестановка блока молча меняет P1 на дефолтный)"
+      - "изменилось поведение сообщений, у которых триггер есть в text"
+      - "тело алерта попадает в описание дважды"
+      - "починка сделана только на стороне отправителя (вернуть триггер в text) — контракт остаётся позиционным, BSGbot по-прежнему не умеет читать blocks"
+      - "правка объявлена проверенной без прогона на живом боте или без сверки канала с Jira после деплоя"
+      - "в коммите есть Co-Authored-By или «Generated with Claude»"
+    notes: |
+      Реальное решение (ветка fix/BSGD-4629-blocks-trigger, коммиты 47b19f5 → 107e2d3 →
+      da9b0a0, MR !25 в main, смержен 2026-08-05):
+      канал C0B4WHQKJJF = приватный #qb-sc-alerts; отправитель risk-alert коммитом по
+      BSGD-4482 стал слать text=alert.message, триггер остался только в build_app_block.
+      Первая версия фикса воспроизвела ту же позиционную случайность (блоки склеивались
+      по порядку и парсились с начала) — ревью поймало. Итог: extract_trigger →
+      TriggerMatch(parse_source, description), разбор от триггера; description = text
+      отправителя; whitelist блоков (section.text, section.fields[], header,
+      context.elements[]) вместо рекурсии — заодно исключает rich_text, где Slack отдаёт
+      неэкранированный текст и процитированный в код-блоке триггер заводил бы задачу.
+      Тесты: 115 passed, фикстура реального события; проверено мутациями. Смоук на живом
+      боте: text без триггера + blocks с триггером и header ПЕРЕД триггер-блоком → бот
+      ответил корректным приоритетом. Парная правка в risk-alert была сделана, но MR
+      закрыт без мержа: после починки получателя она стала не нужна, а цену имела
+      (text — это превью канала и пуши).
