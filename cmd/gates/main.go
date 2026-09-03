@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -280,8 +281,79 @@ func cmdCheck(root string) error {
 		return fmt.Errorf("битых правил: %d", bad)
 	}
 	fmt.Println("✅ все правила загружаются")
+	return checkTimeouts()
+}
+
+// checkTimeouts — согласован ли таймаут хука с тем, сколько правило реально ждёт.
+//
+// Рассогласование не видно ничем: гейт отправляет подтверждение, человек его
+// нажимает, но процесс уже убит по таймауту хука — и команда молча отклоняется.
+// Ровно это случилось на homelab: ожидание 480с при таймауте хука 60с.
+func checkTimeouts() error {
+	home, _ := os.UserHomeDir()
+	raw, err := os.ReadFile(filepath.Join(home, ".claude/settings.json"))
+	if err != nil {
+		return nil // движок может быть не установлен — это не ошибка правил
+	}
+	var cfg struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+				Timeout int    `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if json.Unmarshal(raw, &cfg) != nil {
+		return nil
+	}
+
+	hookTimeout := map[string]int{}
+	for ev, groups := range cfg.Hooks {
+		for _, g := range groups {
+			for _, h := range g.Hooks {
+				if strings.Contains(h.Command, "q0t-gates") {
+					hookTimeout[ev] = h.Timeout
+				}
+			}
+		}
+	}
+	if len(hookTimeout) == 0 {
+		return nil
+	}
+
+	// Сколько правило может ждать: подтверждение человека берёт срок из конфига
+	// Telegram, judge — из своего поля timeout.
+	wait := 0
+	if b, err := os.ReadFile(filepath.Join(home, ".claude/dbhub-telegram.env")); err == nil {
+		if m := reApprovalTimeout.FindSubmatch(b); m != nil {
+			fmt.Sscanf(string(m[1]), "%d", &wait)
+		} else {
+			wait = 540 // дефолт скрипта подтверждения
+		}
+	}
+
+	var problems []string
+	if wait > 0 {
+		if t := hookTimeout["PreToolUse"]; t > 0 && wait+60 > t {
+			problems = append(problems, fmt.Sprintf(
+				"PreToolUse: хук живёт %dс, а подтверждение ждёт %dс — нажатие придёт уже некому.\n"+
+					"   Нужно: таймаут хука ≥ %dс либо DBHUB_APPROVAL_TIMEOUT ≤ %dс",
+				t, wait, wait+60, t-60))
+		}
+	}
+
+	if len(problems) > 0 {
+		fmt.Println("\n⚠ таймауты рассогласованы:")
+		for _, p := range problems {
+			fmt.Println("   " + p)
+		}
+		return fmt.Errorf("рассогласование таймаутов: %d", len(problems))
+	}
+	fmt.Println("✅ таймауты согласованы")
 	return nil
 }
+
+var reApprovalTimeout = regexp.MustCompile(`DBHUB_APPROVAL_TIMEOUT\s*=\s*"?(\d+)`)
 
 // cmdAudit — менеджерский взгляд: какие гейты срабатывают, какие обходят.
 //

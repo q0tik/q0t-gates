@@ -24,7 +24,18 @@ settings_path, gate = sys.argv[1], sys.argv[2]
 with open(settings_path) as f:
     cfg = json.load(f)
 
-EVENTS = ["PreToolUse", "PostToolUse", "Stop", "SubagentStop", "UserPromptSubmit"]
+# Таймаут хука обязан пережить самое долгое, что правило может делать.
+# Рассогласование стоило живого бага: гейт слал подтверждение в Telegram и
+# ждал 480с, а Claude Code убивал его через 60 — нажатие приходило уже
+# некому, команда молча отклонялась.
+EVENT_TIMEOUT = {
+    "PreToolUse": 600,      # тут правило может ждать нажатия человека
+    "Stop": 180,            # тут работает judge (claude -p, до 45с)
+    "SubagentStop": 180,
+    "PostToolUse": 60,
+    "UserPromptSubmit": 60,
+}
+EVENTS = list(EVENT_TIMEOUT)
 hooks = cfg.setdefault("hooks", {})
 
 added, kept = [], []
@@ -38,6 +49,7 @@ for ev in EVENTS:
         for h in g.get("hooks", []):
             if "q0t-gates" in h.get("command", ""):
                 h["command"] = gate
+                h["timeout"] = EVENT_TIMEOUT[ev]
                 found = True
     if found:
         kept.append(ev)
@@ -47,7 +59,7 @@ for ev in EVENTS:
         "hooks": [{
             "type": "command",
             "command": gate,
-            "timeout": 60,
+            "timeout": EVENT_TIMEOUT[ev],
             "statusMessage": "q0t-gates: проверка правил...",
         }]
     })
@@ -60,7 +72,8 @@ with open(settings_path, "w") as f:
 if added:
     print("зарегистрировано:", ", ".join(added))
 if kept:
-    print("обновлён путь:", ", ".join(kept))
+    print("обновлены путь и таймаут:", ", ".join(kept))
+print("таймауты:", ", ".join(f"{e}={t}с" for e, t in EVENT_TIMEOUT.items()))
 PY
 
 python3 -c "import json;json.load(open('$SETTINGS'))" \
